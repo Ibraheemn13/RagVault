@@ -1,0 +1,280 @@
+import os
+import uuid
+from typing import List
+
+import streamlit as st
+import chromadb
+from chromadb.config import Settings
+
+import google.generativeai as genai
+from pypdf import PdfReader
+import docx  # python-docx
+
+
+# ============ CONFIG: API KEY & PATHS ============
+
+# 1) GEMINI API KEY
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # 👈 Option A: environment variable
+# GEMINI_API_KEY = "your-api-key-here"       # 👈 Option B: hardcode for local tests
+
+if not GEMINI_API_KEY:
+    st.set_page_config(page_title="RAG with Gemini & Streamlit")
+    st.error("❌ GEMINI_API_KEY is not set. Set it as an env var or in the code.")
+    st.stop()
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 2) Paths for storage
+UPLOAD_DIR = "uploaded_files"
+CHROMA_DIR = "chroma_db"
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+os.makedirs(CHROMA_DIR, exist_ok=True)
+
+
+# ============ EMBEDDING FUNCTION (GEMINI) ============
+
+class GeminiEmbeddingFunction:
+    """
+    Chroma embedding function wrapper around Google Gemini embeddings.
+    """
+
+    def __init__(self, model_name: str = "text-embedding-004"):
+        self.model_name = model_name
+
+    def __call__(self, texts: List[str]) -> List[List[float]]:
+        embeddings = []
+        for t in texts:
+            # gemini embed_content returns { "embedding": [...] }
+            res = genai.embed_content(model=self.model_name, content=t)
+            embeddings.append(res["embedding"])
+        return embeddings
+
+
+embedding_fn = GeminiEmbeddingFunction()
+
+
+# ============ CHROMA SETUP ============
+
+def get_chroma_collection():
+    """
+    Create/load a persistent Chroma collection using Gemini embeddings.
+    """
+    client = chromadb.PersistentClient(
+        path=CHROMA_DIR,
+        settings=Settings(anonymized_telemetry=False)
+    )
+    collection = client.get_or_create_collection(
+        name="rag_documents",
+        embedding_function=embedding_fn
+    )
+    return collection
+
+
+collection = get_chroma_collection()
+
+
+# ============ FILE PARSING HELPERS ============
+
+def load_pdf_text(file_path: str) -> str:
+    reader = PdfReader(file_path)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+        text += "\n"
+    return text
+
+
+def load_docx_text(file_path: str) -> str:
+    doc = docx.Document(file_path)
+    paragraphs = [p.text for p in doc.paragraphs]
+    return "\n".join(paragraphs)
+
+
+def load_file_text(file_path: str) -> str:
+    if file_path.lower().endswith(".pdf"):
+        return load_pdf_text(file_path)
+    elif file_path.lower().endswith(".docx"):
+        return load_docx_text(file_path)
+    else:
+        raise ValueError(f"Unsupported file type: {file_path}")
+
+
+# ============ TEXT CHUNKING ============
+
+def chunk_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
+    """
+    Simple word-based chunking.
+    chunk_size/overlap here are in *words*, not characters.
+    """
+    words = text.split()
+    chunks = []
+    start = 0
+    while start < len(words):
+        end = start + chunk_size
+        chunk = " ".join(words[start:end])
+        chunks.append(chunk)
+        start += chunk_size - chunk_overlap
+    return [c for c in chunks if c.strip()]
+
+
+# ============ INGESTION PIPELINE ============
+
+def ingest_file_into_chroma(file_path: str):
+    """
+    Load a PDF/DOCX, chunk its text, and add to Chroma collection.
+    """
+    file_name = os.path.basename(file_path)
+    st.write(f"📄 Processing: `{file_name}` ...")
+
+    raw_text = load_file_text(file_path)
+    if not raw_text.strip():
+        st.warning(f"⚠ No text extracted from {file_name}. Skipping.")
+        return
+
+    chunks = chunk_text(raw_text)
+    st.write(f"✅ Extracted {len(chunks)} chunks from `{file_name}`.")
+
+    ids = [str(uuid.uuid4()) for _ in chunks]
+    metadatas = [{"source": file_name} for _ in chunks]
+
+    collection.add(
+        documents=chunks,
+        metadatas=metadatas,
+        ids=ids
+    )
+    st.success(f"✅ Ingested `{file_name}` into vector store.")
+
+
+def ingest_uploaded_files(uploaded_files):
+    """
+    Save uploaded files to disk and ingest them into Chroma.
+    """
+    if not uploaded_files:
+        st.warning("Please upload at least one file.")
+        return
+
+    for uploaded_file in uploaded_files:
+        save_path = os.path.join(UPLOAD_DIR, uploaded_file.name)
+
+        # Save file to disk
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        # Ingest into vector store
+        try:
+            ingest_file_into_chroma(save_path)
+        except Exception as e:
+            st.error(f"Error processing {uploaded_file.name}: {e}")
+
+
+# ============ RAG: RETRIEVE + GENERATE ============
+
+def retrieve_relevant_chunks(query: str, k: int = 5):
+    """
+    Query Chroma to get the top-k relevant chunks for a user question.
+    """
+    results = collection.query(
+        query_texts=[query],
+        n_results=k
+    )
+    # results["documents"] is List[List[str]], we only have one query, so [0]
+    docs = results.get("documents", [[]])[0]
+    metadatas = results.get("metadatas", [[]])[0]
+
+    return list(zip(docs, metadatas))
+
+
+def build_prompt_with_context(question: str, docs_and_meta) -> str:
+    """
+    Build a prompt for Gemini that includes retrieved context.
+    """
+    context_blocks = []
+    for i, (doc, meta) in enumerate(docs_and_meta, start=1):
+        source = meta.get("source", "unknown")
+        context_blocks.append(f"[Chunk {i} | Source: {source}]\n{doc}")
+
+    context_text = "\n\n".join(context_blocks) if context_blocks else "No relevant context found."
+
+    prompt = f"""
+You are a helpful assistant answering questions based *only* on the provided context.
+
+CONTEXT:
+{context_text}
+
+QUESTION:
+{question}
+
+INSTRUCTIONS:
+- If the context does not contain the answer, say you do not know or that the documents don't mention it.
+- Cite the chunk numbers or source file names when useful.
+- Answer clearly and concisely.
+"""
+    return prompt
+
+
+def answer_question_with_rag(question: str) -> str:
+    docs_and_meta = retrieve_relevant_chunks(question, k=5)
+    prompt = build_prompt_with_context(question, docs_and_meta)
+
+    model = genai.GenerativeModel("gemini-1.5-flash")  # or "gemini-1.5-pro"
+    response = model.generate_content(prompt)
+    return response.text
+
+
+# ============ STREAMLIT UI ============
+
+st.set_page_config(page_title="RAG over PDFs/DOCX with Gemini", layout="wide")
+
+st.title("📚 RAG Chat over Your PDFs & DOCX (Gemini + Chroma + Streamlit)")
+
+with st.sidebar:
+    st.header("1️⃣ Upload & Ingest Documents")
+    uploaded_files = st.file_uploader(
+        "Upload PDF/DOCX files",
+        type=["pdf", "docx"],
+        accept_multiple_files=True
+    )
+
+    if st.button("Ingest uploaded files into vector store"):
+        ingest_uploaded_files(uploaded_files)
+
+    st.markdown("---")
+    st.write("Vector store path:", f"`{CHROMA_DIR}`")
+    st.write("Uploaded files path:", f"`{UPLOAD_DIR}`")
+
+    st.markdown("---")
+    st.caption("Gemini RAG demo. Your documents are stored on this server only.")
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+st.header("2️⃣ Chat with your documents")
+
+# Show chat history
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Chat input
+user_input = st.chat_input("Ask a question about your uploaded documents...")
+if user_input:
+    # Store user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
+    # Display user message
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    # Generate assistant response using RAG
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking with RAG..."):
+            try:
+                answer = answer_question_with_rag(user_input)
+            except Exception as e:
+                answer = f"❌ Error during RAG answer: {e}"
+        st.markdown(answer)
+
+    # Store assistant message
+    st.session_state.messages.append({"role": "assistant", "content": answer})
