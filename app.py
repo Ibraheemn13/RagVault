@@ -1,6 +1,7 @@
 import os
 import uuid
 from typing import List
+import shutil
 
 import streamlit as st
 import chromadb
@@ -282,3 +283,13 @@ if user_input:
 
     # Store assistant message
     st.session_state.messages.append({"role": "assistant", "content": answer})
+
+with st.sidebar:
+    if st.button("🔁 Clear vector store (chroma_db)"):
+        try:
+            if os.path.exists(CHROMA_DIR):
+                shutil.rmtree(CHROMA_DIR)
+            os.makedirs(CHROMA_DIR, exist_ok=True)
+            st.success("Vector store cleared. It will be recreated on next use.")
+        except Exception as e:
+            st.error(f"Error clearing vector store: {e}")
