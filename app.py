@@ -222,9 +222,14 @@ def answer_question_with_rag(question: str) -> str:
     docs_and_meta = retrieve_relevant_chunks(question, k=5)
     prompt = build_prompt_with_context(question, docs_and_meta)
 
-    model = genai.GenerativeModel("gemini-1.5-flash")  # or "gemini-1.5-pro"
+    # Updated model name:
+    model = genai.GenerativeModel("gemini-flash-latest")
+    # safe fallback:
+    # model = genai.GenerativeModel("gemini-pro")
+
     response = model.generate_content(prompt)
     return response.text
+
 
 
 # ============ STREAMLIT UI ============
