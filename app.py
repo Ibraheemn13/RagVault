@@ -5,6 +5,7 @@ from typing import List
 import streamlit as st
 import chromadb
 from chromadb.config import Settings
+from chromadb.utils.embedding_functions import EmbeddingFunction
 
 import google.generativeai as genai
 from pypdf import PdfReader
@@ -33,9 +34,10 @@ os.makedirs(CHROMA_DIR, exist_ok=True)
 
 # ============ EMBEDDING FUNCTION (GEMINI) ============
 
-class GeminiEmbeddingFunction:
+class GeminiEmbeddingFunction(EmbeddingFunction):
     """
     Chroma embedding function wrapper around Google Gemini embeddings.
+    Must implement __call__ and name() for Chroma 0.5+.
     """
 
     def __init__(self, model_name: str = "text-embedding-004"):
@@ -44,10 +46,13 @@ class GeminiEmbeddingFunction:
     def __call__(self, texts: List[str]) -> List[List[float]]:
         embeddings = []
         for t in texts:
-            # gemini embed_content returns { "embedding": [...] }
             res = genai.embed_content(model=self.model_name, content=t)
             embeddings.append(res["embedding"])
         return embeddings
+
+    def name(self) -> str:
+        # Any stable name string is fine; this is stored in Chroma's metadata
+        return f"gemini-{self.model_name}"
 
 
 embedding_fn = GeminiEmbeddingFunction()
@@ -64,7 +69,7 @@ def get_chroma_collection():
         settings=Settings(anonymized_telemetry=False)
     )
     collection = client.get_or_create_collection(
-        name="rag_documents",
+        name="rag_documents_v2",
         embedding_function=embedding_fn
     )
     return collection
