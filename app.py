@@ -14,8 +14,7 @@ import docx  # python-docx
 # ============ CONFIG: API KEY & PATHS ============
 
 # 1) GEMINI API KEY
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # 👈 Option A: environment variable
-# GEMINI_API_KEY = "your-api-key-here"       # 👈 Option B: hardcode for local tests
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.set_page_config(page_title="RAG with Gemini & Streamlit")
