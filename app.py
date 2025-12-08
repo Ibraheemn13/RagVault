@@ -20,7 +20,7 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.set_page_config(page_title="RAG with Gemini & Streamlit")
-    st.error("❌ GEMINI_API_KEY is not set. Set it as an env var or in the code.")
+    st.error("GEMINI_API_KEY is not set. Set it as an env var or in the code.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -130,15 +130,15 @@ def ingest_file_into_chroma(file_path: str):
     Load a PDF/DOCX, chunk its text, and add to Chroma collection.
     """
     file_name = os.path.basename(file_path)
-    st.write(f"📄 Processing: `{file_name}` ...")
+    st.write(f"Processing: `{file_name}` ...")
 
     raw_text = load_file_text(file_path)
     if not raw_text.strip():
-        st.warning(f"⚠ No text extracted from {file_name}. Skipping.")
+        st.warning(f"No text extracted from {file_name}. Skipping.")
         return
 
     chunks = chunk_text(raw_text)
-    st.write(f"✅ Extracted {len(chunks)} chunks from `{file_name}`.")
+    st.write(f"Extracted {len(chunks)} chunks from `{file_name}`.")
 
     ids = [str(uuid.uuid4()) for _ in chunks]
     metadatas = [{"source": file_name} for _ in chunks]
@@ -148,7 +148,7 @@ def ingest_file_into_chroma(file_path: str):
         metadatas=metadatas,
         ids=ids
     )
-    st.success(f"✅ Ingested `{file_name}` into vector store.")
+    st.success(f"Ingested `{file_name}` into vector store.")
 
 
 def ingest_uploaded_files(uploaded_files):
@@ -202,7 +202,7 @@ def build_prompt_with_context(question: str, docs_and_meta) -> str:
     context_text = "\n\n".join(context_blocks) if context_blocks else "No relevant context found."
 
     prompt = f"""
-You are a helpful assistant answering questions based *only* on the provided context.
+You are a helpful assistant answering questions based only on the provided context.
 
 CONTEXT:
 {context_text}
@@ -211,7 +211,7 @@ QUESTION:
 {question}
 
 INSTRUCTIONS:
-- If the context does not contain the answer, say you do not know or that the documents don't mention it.
+- If the context does not contain the answer, say you do not know or that the documents do not mention it.
 - Cite the chunk numbers or source file names when useful.
 - Answer clearly and concisely.
 """
@@ -231,36 +231,121 @@ def answer_question_with_rag(question: str) -> str:
     return response.text
 
 
-
 # ============ STREAMLIT UI ============
 
 st.set_page_config(page_title="RAG over PDFs/DOCX with Gemini", layout="wide")
 
-st.title("📚 RAG Chat over Your PDFs & DOCX (Gemini + Chroma + Streamlit)")
+# Basic custom styling
+st.markdown(
+    """
+    <style>
+    .app-title {
+        font-size: 1.8rem;
+        font-weight: 700;
+        margin-bottom: 0.25rem;
+    }
+    .app-subtitle {
+        font-size: 0.95rem;
+        color: #4b5563;
+        margin-bottom: 1.5rem;
+    }
+    .sidebar-section-title {
+        font-weight: 600;
+        margin-top: 0.5rem;
+        margin-bottom: 0.25rem;
+        font-size: 0.95rem;
+    }
+    .sidebar-caption {
+        font-size: 0.8rem;
+        color: #6b7280;
+    }
+    .stat-block {
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+        background-color: #f9fafb;
+    }
+    .stat-label {
+        color: #6b7280;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 0.15rem;
+    }
+    .stat-value {
+        color: #111827;
+        font-weight: 600;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="app-title">RAG Vault: Chat over Your Documents</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="app-subtitle">Upload PDF or DOCX files in the sidebar, ingest them into a vector store, and then chat with a Gemini-powered assistant grounded in your documents.</div>',
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
-    st.header("1️⃣ Upload & Ingest Documents")
+    st.markdown('<div class="sidebar-section-title">Upload and ingest documents</div>', unsafe_allow_html=True)
     uploaded_files = st.file_uploader(
-        "Upload PDF/DOCX files",
+        "Select PDF or DOCX files",
         type=["pdf", "docx"],
         accept_multiple_files=True
     )
 
-    if st.button("Ingest uploaded files into vector store"):
+    if st.button("Upload files into vector store"):
         ingest_uploaded_files(uploaded_files)
 
-    st.markdown("---")
-    st.write("Vector store path:", f"`{CHROMA_DIR}`")
-    st.write("Uploaded files path:", f"`{UPLOAD_DIR}`")
+    st.markdown("<hr/>", unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.caption("Gemini RAG demo. Your documents are stored on this server only.")
+    st.markdown('<div class="sidebar-section-title">Storage</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sidebar-caption">Vector store directory:<br><code>{CHROMA_DIR}</code></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sidebar-caption">Uploaded files directory:<br><code>{UPLOAD_DIR}</code></div>', unsafe_allow_html=True)
+
+    # Show simple stats
+    try:
+        num_chunks = collection.count()
+    except Exception:
+        num_chunks = "?"
+
+    st.markdown(
+        f"""
+        <div class="stat-block">
+            <div class="stat-label">Indexed chunks</div>
+            <div class="stat-value">{num_chunks}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-section-title">Maintenance</div>', unsafe_allow_html=True)
+    if st.button("Clear vector store (chroma_db)"):
+        try:
+            if os.path.exists(CHROMA_DIR):
+                shutil.rmtree(CHROMA_DIR)
+            os.makedirs(CHROMA_DIR, exist_ok=True)
+            # Recreate collection so the app continues to work without reload
+            collection = get_chroma_collection()
+            st.success("Vector store cleared. It will be recreated on next use.")
+        except Exception as e:
+            st.error(f"Error clearing vector store: {e}")
+
+    st.markdown("<hr/>", unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sidebar-caption">Documents and embeddings are stored on this server only. Clearing the vector store will remove all indexed chunks.</div>',
+        unsafe_allow_html=True,
+    )
 
 # Initialize chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.header("2️⃣ Chat with your documents")
+st.subheader("Chat with your documents")
 
 # Show chat history
 for msg in st.session_state.messages:
@@ -279,22 +364,12 @@ if user_input:
 
     # Generate assistant response using RAG
     with st.chat_message("assistant"):
-        with st.spinner("Thinking with RAG..."):
+        with st.spinner("Generating answer using RAG..."):
             try:
                 answer = answer_question_with_rag(user_input)
             except Exception as e:
-                answer = f"❌ Error during RAG answer: {e}"
+                answer = f"Error during RAG answer: {e}"
         st.markdown(answer)
 
     # Store assistant message
     st.session_state.messages.append({"role": "assistant", "content": answer})
-
-with st.sidebar:
-    if st.button("🔁 Clear vector store (chroma_db)"):
-        try:
-            if os.path.exists(CHROMA_DIR):
-                shutil.rmtree(CHROMA_DIR)
-            os.makedirs(CHROMA_DIR, exist_ok=True)
-            st.success("Vector store cleared. It will be recreated on next use.")
-        except Exception as e:
-            st.error(f"Error clearing vector store: {e}")
