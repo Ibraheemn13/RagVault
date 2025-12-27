@@ -11,12 +11,14 @@ from chromadb.utils.embedding_functions import EmbeddingFunction
 import google.generativeai as genai
 from pypdf import PdfReader
 import docx  # python-docx
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # ============ CONFIG: API KEY & PATHS ============
 
 # 1) GEMINI API KEY
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") or st.secrets.get("GEMINI_API_KEY", "")
 
 if not GEMINI_API_KEY:
     st.set_page_config(page_title="RAG with Gemini & Streamlit")
