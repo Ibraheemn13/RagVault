@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 from typing import List
 import shutil
@@ -28,8 +29,10 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # 2) Paths for storage
-UPLOAD_DIR = "uploaded_files"
-CHROMA_DIR = "chroma_db"
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploaded_files")
+CHROMA_DIR = os.path.join(BASE_DIR, "chroma_db")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(CHROMA_DIR, exist_ok=True)
@@ -185,7 +188,6 @@ def retrieve_relevant_chunks(query: str, k: int = 5):
         query_texts=[query],
         n_results=k
     )
-    # results["documents"] is List[List[str]], we only have one query, so [0]
     docs = results.get("documents", [[]])[0]
     metadatas = results.get("metadatas", [[]])[0]
 
@@ -224,10 +226,7 @@ def answer_question_with_rag(question: str) -> str:
     docs_and_meta = retrieve_relevant_chunks(question, k=5)
     prompt = build_prompt_with_context(question, docs_and_meta)
 
-    # Updated model name:
     model = genai.GenerativeModel("gemini-flash-latest")
-    # safe fallback:
-    # model = genai.GenerativeModel("gemini-pro")
 
     response = model.generate_content(prompt)
     return response.text
@@ -235,9 +234,8 @@ def answer_question_with_rag(question: str) -> str:
 
 # ============ STREAMLIT UI ============
 
-st.set_page_config(page_title="RAG over PDFs/DOCX with Gemini", layout="wide")
+st.set_page_config(page_title="RAG Vault", layout="wide")
 
-# Basic custom styling
 st.markdown(
     """
     <style>

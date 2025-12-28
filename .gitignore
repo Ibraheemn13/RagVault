@@ -11,3 +11,8 @@ venv.bak/
 # DB and uploaded files
 chroma_db/
 uploaded_files/
+
+# Python cache and build files
+build/
+dist/
+# RAG-Vault.spec

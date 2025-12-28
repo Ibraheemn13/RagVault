@@ -41,3 +41,7 @@ Don't forget to give the project a star! Thanks again!
 <p align="center">
 https://github.com/Ibraheemn13
 </p>
+
+
+
+py -m PyInstaller --onedir --name "RAG-Vault" run_app.py
