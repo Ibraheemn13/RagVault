@@ -1,0 +1,13 @@
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# DB and uploaded files
+chroma_db/
+uploaded_files/
